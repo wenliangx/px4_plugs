@@ -1,0 +1,26 @@
+<launch>
+  <!--
+    PX4 Parameter Migrator Launch File
+
+    Arguments:
+      connection_url  : MAVLink connection URL
+      filter_file     : YAML file defining which params to include/exclude
+      export_dir      : Directory to save exported param files
+      import_file     : Specific file to import from (empty = auto-detect latest)
+      reboot_after_import : Reboot FC after import to persist
+  -->
+  <arg name="connection_url"      default="udp:127.0.0.1:14550" />
+  <arg name="filter_file"         default="$(find px4_param_migrator)/config/param_filter.yaml" />
+  <arg name="export_dir"          default="~/.px4_params" />
+  <arg name="import_file"         default="" />
+  <arg name="reboot_after_import" default="false" />
+
+  <node name="px4_param_migrator" pkg="px4_param_migrator" type="param_migrator_node.py"
+        output="screen">
+    <param name="connection_url"      value="$(arg connection_url)" />
+    <param name="filter_file"         value="$(arg filter_file)" />
+    <param name="export_dir"          value="$(arg export_dir)" />
+    <param name="import_file"         value="$(arg import_file)" />
+    <param name="reboot_after_import" value="$(arg reboot_after_import)" />
+  </node>
+</launch>
