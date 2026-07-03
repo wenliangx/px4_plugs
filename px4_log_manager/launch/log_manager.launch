@@ -1,0 +1,23 @@
+<launch>
+  <!--
+    PX4 Log Manager Launch File
+
+    Arguments:
+      connection_url : MAVLink connection URL
+        - udp:127.0.0.1:14550  (SITL default)
+        - /dev/ttyACM0           (direct USB)
+        - serial:/dev/ttyUSB0:921600
+      download_dir   : Local directory to save .ulg files
+      auto_erase     : If true, erase logs from FC after download
+  -->
+  <arg name="connection_url" default="udp:127.0.0.1:14550" />
+  <arg name="download_dir"   default="~/.px4_logs" />
+  <arg name="auto_erase"     default="true" />
+
+  <node name="px4_log_manager" pkg="px4_log_manager" type="log_manager_node.py"
+        output="screen">
+    <param name="connection_url" value="$(arg connection_url)" />
+    <param name="download_dir"   value="$(arg download_dir)" />
+    <param name="auto_erase"     value="$(arg auto_erase)" />
+  </node>
+</launch>
