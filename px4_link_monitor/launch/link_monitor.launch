@@ -1,0 +1,14 @@
+<launch>
+  <arg name="log_dir"         default="~/.px4_monitor" />
+  <arg name="rate_window"     default="10.0" />
+  <arg name="overflow_cooldown" default="5.0" />
+  <arg name="watch_topics"    default="/mavros/setpoint_raw/local,/mavros/setpoint_position/local" />
+
+  <node name="px4_link_monitor" pkg="px4_link_monitor" type="link_monitor_node.py"
+        output="screen">
+    <param name="log_dir"           value="$(arg log_dir)" />
+    <param name="rate_window"       value="$(arg rate_window)" />
+    <param name="overflow_cooldown" value="$(arg overflow_cooldown)" />
+    <param name="watch_topics"      value="$(arg watch_topics)" />
+  </node>
+</launch>
