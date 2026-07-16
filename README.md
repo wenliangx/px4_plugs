@@ -148,7 +148,9 @@ roslaunch px4_link_monitor link_monitor.launch
 
 ### USB 链路初始化
 
-默认不启用初始化功能。建议先 dry-run 查看将要发送的 message interval / stream rate：
+默认不启用初始化功能。只要设置 `enable_usb_init:=true`，节点启动后会立即调度一次
+USB 链路初始化，不等待 MAVROS `/diagnostics` 报告 FCU connected。建议先 dry-run
+查看将要发送的 message interval：
 
 ```bash
 roslaunch px4_link_monitor link_monitor.launch \

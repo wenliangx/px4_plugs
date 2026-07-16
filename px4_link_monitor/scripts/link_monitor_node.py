@@ -494,6 +494,7 @@ class PX4LinkMonitor:
         rospy.Service("~init_status", Trigger, self._handle_init_status)
 
         self._log_event("SESSION_START", "Link Monitor started")
+        self._maybe_schedule_usb_init("startup")
         self._publish_status()
         rospy.loginfo("PX4 Link Monitor initialized (log: %s)", self._log_path)
 
@@ -511,9 +512,6 @@ class PX4LinkMonitor:
         )
         self.watch_topics = [t.strip() for t in watch_raw.split(",") if t.strip()]
         self.enable_usb_init = rospy.get_param("~enable_usb_init", False)
-        self.auto_init_on_fcu_connected = rospy.get_param(
-            "~auto_init_on_fcu_connected", True
-        )
         self.init_config = rospy.get_param("~init_config", "")
         self.connection_url = rospy.get_param("~connection_url", "udp:127.0.0.1:14550")
         self.baudrate = rospy.get_param("~baudrate", 115200)
@@ -713,7 +711,7 @@ class PX4LinkMonitor:
         )
 
     def _maybe_schedule_usb_init(self, reason: str):
-        if not self.enable_usb_init or not self.auto_init_on_fcu_connected:
+        if not self.enable_usb_init:
             return
         if self._usb_init_started:
             return

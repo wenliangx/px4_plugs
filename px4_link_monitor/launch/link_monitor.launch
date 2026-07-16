@@ -4,7 +4,6 @@
   <arg name="overflow_cooldown" default="5.0" />
   <arg name="watch_topics"    default="/mavros/setpoint_raw/local,/mavros/setpoint_position/local" />
   <arg name="enable_usb_init" default="false" />
-  <arg name="auto_init_on_fcu_connected" default="true" />
   <arg name="init_config" default="$(find px4_link_monitor)/config/usb_link_init.yaml" />
   <arg name="connection_url" default="udp:127.0.0.1:14550" />
   <arg name="baudrate" default="115200" />
@@ -18,7 +17,6 @@
     <param name="overflow_cooldown" value="$(arg overflow_cooldown)" />
     <param name="watch_topics"      value="$(arg watch_topics)" />
     <param name="enable_usb_init" value="$(arg enable_usb_init)" />
-    <param name="auto_init_on_fcu_connected" value="$(arg auto_init_on_fcu_connected)" />
     <param name="init_config" value="$(arg init_config)" />
     <param name="connection_url" value="$(arg connection_url)" />
     <param name="baudrate" value="$(arg baudrate)" />
