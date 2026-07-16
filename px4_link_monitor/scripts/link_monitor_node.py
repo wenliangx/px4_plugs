@@ -98,9 +98,12 @@ class USBLinkInitializer:
         "SYSTEM_TIME": 2,
         "GPS_RAW_INT": 24,
         "ATTITUDE": 30,
+        "ATTITUDE_QUATERNION": 31,
         "LOCAL_POSITION_NED": 32,
         "GLOBAL_POSITION_INT": 33,
+        "NAV_CONTROLLER_OUTPUT": 62,
         "RC_CHANNELS": 65,
+        "VFR_HUD": 74,
         "HIGHRES_IMU": 105,
         "TIMESYNC": 111,
         "ATTITUDE_TARGET": 83,
@@ -243,6 +246,8 @@ class USBLinkInitializer:
     @staticmethod
     def _parse_scalar(value: str):
         lowered = value.lower()
+        if lowered == "{}":
+            return {}
         if lowered == "true":
             return True
         if lowered == "false":
@@ -288,11 +293,11 @@ class USBLinkInitializer:
 
     def _apply_message_intervals(self, intervals: dict) -> int:
         count = 0
-        for name, hz in sorted((intervals or {}).items()):
+        for name, rate in sorted((intervals or {}).items()):
             msg_id = self._message_id(name)
-            interval_us = self._hz_to_interval_us(hz)
-            detail = "message=%s id=%d hz=%s interval_us=%d" % (
-                name, msg_id, hz, interval_us,
+            interval_us = self._message_interval_to_us(rate)
+            detail = "message=%s id=%d rate=%s interval_us=%d" % (
+                name, msg_id, rate, interval_us,
             )
             if self.dry_run:
                 self._log_event("USB_INIT_MSG_INTERVAL_DRYRUN", detail)
@@ -429,9 +434,19 @@ class USBLinkInitializer:
         return self.STREAM_IDS[key]
 
     @staticmethod
-    def _hz_to_interval_us(hz) -> int:
-        hz_value = float(hz)
-        if hz_value <= 0:
+    def _message_interval_to_us(rate) -> int:
+        if isinstance(rate, str):
+            normalized = rate.strip().lower()
+            if normalized in ("default", "restore", "restore_default", "qgc_default"):
+                return 0
+            if normalized in ("disable", "disabled", "off"):
+                return -1
+            rate = normalized
+
+        hz_value = float(rate)
+        if hz_value == 0:
+            return 0
+        if hz_value < 0:
             return -1
         return int(1000000.0 / hz_value)
 

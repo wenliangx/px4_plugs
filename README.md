@@ -167,8 +167,20 @@ roslaunch px4_link_monitor link_monitor.launch \
 ```
 
 默认 profile 在 `px4_link_monitor/config/usb_link_init.yaml`。其中 `params_enabled`
-默认是 `false`，不会持久写 PX4 参数；当前主要调整运行期 message interval 和
-legacy data stream rate，用来验证是否能减少 USB 链路 TX overflow。
+默认是 `false`，不会持久写 PX4 参数。默认 profile 使用 QGC 的 restore-default
+风格：对 QGC 调参视图可能临时提高频率的消息发送 `MAV_CMD_SET_MESSAGE_INTERVAL`
+且 `interval_us=0`，让 PX4 恢复固件默认消息频率；不默认发送 legacy data stream rate。
+
+当前默认恢复这些消息：
+
+```text
+ATTITUDE_QUATERNION
+ATTITUDE_TARGET
+LOCAL_POSITION_NED
+POSITION_TARGET_LOCAL_NED
+NAV_CONTROLLER_OUTPUT
+VFR_HUD
+```
 
 ### 调用 ROS 服务
 

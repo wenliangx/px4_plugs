@@ -1,36 +1,27 @@
 # PX4 USB MAVLink link initialization profile.
 #
-# This profile is intentionally conservative: by default it only adjusts
-# runtime MAVLink message intervals / data streams and does not persistently
-# write PX4 parameters. Set params_enabled: true only after reviewing the
-# exact parameters for your firmware and airframe.
+# QGroundControl does not normally persistently write PX4 link parameters when
+# connecting. For PX4, its current stream helper restores MAV_CMD_SET_MESSAGE_INTERVAL
+# back to the vehicle default by sending interval_us=0 for messages it may
+# temporarily raise during tuning views.
+#
+# This profile follows that QGC "restore defaults" behavior. It does not write
+# PX4 parameters and does not request legacy data streams by default.
 
 params_enabled: false
+params: {}
 
-# Optional persistent PX4 parameter writes. These are examples/placeholders for
-# USB MAVLink tuning and are skipped unless params_enabled is true.
-params:
-  # MAV_0_RATE: 40000
-  # MAV_0_MODE: 0
-
-# Runtime message rates, in Hz. A value <= 0 disables the message where the
-# firmware supports MAV_CMD_SET_MESSAGE_INTERVAL.
+# Values:
+#   DEFAULT  -> MAV_CMD_SET_MESSAGE_INTERVAL param2 = 0, restore vehicle default
+#   DISABLE  -> param2 = -1, disable message where supported
+#   number   -> Hz, converted to interval_us
 message_intervals:
-  HEARTBEAT: 1
-  SYS_STATUS: 2
-  SYSTEM_TIME: 1
-  GPS_RAW_INT: 5
-  ATTITUDE: 20
-  LOCAL_POSITION_NED: 20
-  GLOBAL_POSITION_INT: 5
-  HIGHRES_IMU: 20
-  RC_CHANNELS: 5
-  ODOMETRY: 20
+  ATTITUDE_QUATERNION: DEFAULT
+  ATTITUDE_TARGET: DEFAULT
+  LOCAL_POSITION_NED: DEFAULT
+  POSITION_TARGET_LOCAL_NED: DEFAULT
+  NAV_CONTROLLER_OUTPUT: DEFAULT
+  VFR_HUD: DEFAULT
 
-# Legacy stream-rate fallback/compatibility requests, in Hz.
-streams:
-  EXT_STAT: 2
-  POSITION: 10
-  EXTRA1: 20
-  EXTRA2: 10
-  EXTRA3: 5
+# QGC PX4 connection flow does not set old REQUEST_DATA_STREAM rates by default.
+streams: {}
