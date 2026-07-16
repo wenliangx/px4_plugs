@@ -126,3 +126,59 @@ rosservice call /px4_param_migrator/reload_filter
 ```
 
 导出文件保存在 `~/.px4_params/px4_params_YYYYmmdd_HHMMSS.yaml`，状态发布到 `/px4_param_migrator/status` 话题。
+
+---
+
+## px4_link_monitor
+
+嵌入 ROS 1 的 PX4 MAVLink 链路健康监控包，支持：
+- 监控 `/diagnostics` 中的 MAVLink TX queue overflow / dropped message
+- 统计指定 MAVROS 话题发布频率
+- 记录 FCU / GCS 连接状态变化
+- 可选：FCU 连接后执行 USB 链路初始化 profile，模拟 QGC 连接后的消息流整理动作
+
+### 启动监控
+
+```bash
+roslaunch px4_link_monitor link_monitor.launch
+```
+
+日志默认写入 `~/.px4_monitor/link_monitor_YYYYmmdd_HHMMSS.log`，并维护
+`~/.px4_monitor/link_monitor_latest.log` 软链接。
+
+### USB 链路初始化
+
+默认不启用初始化功能。建议先 dry-run 查看将要发送的 message interval / stream rate：
+
+```bash
+roslaunch px4_link_monitor link_monitor.launch \
+  enable_usb_init:=true \
+  dry_run:=true
+```
+
+确认配置后再真正发送运行期 MAVLink 初始化命令：
+
+```bash
+roslaunch px4_link_monitor link_monitor.launch \
+  enable_usb_init:=true \
+  dry_run:=false \
+  connection_url:=/dev/ttyACM0 \
+  baudrate:=115200
+```
+
+默认 profile 在 `px4_link_monitor/config/usb_link_init.yaml`。其中 `params_enabled`
+默认是 `false`，不会持久写 PX4 参数；当前主要调整运行期 message interval 和
+legacy data stream rate，用来验证是否能减少 USB 链路 TX overflow。
+
+### 调用 ROS 服务
+
+| 服务名 | 功能 |
+|--------|------|
+| `~status_report` | 查看链路监控状态 |
+| `~init_usb_link` | 手动执行一次 USB 链路初始化 |
+| `~init_status` | 查看最近一次初始化结果 |
+
+```bash
+rosservice call /px4_link_monitor/init_usb_link
+rosservice call /px4_link_monitor/status_report
+```

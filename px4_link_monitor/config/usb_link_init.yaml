@@ -1,0 +1,36 @@
+# PX4 USB MAVLink link initialization profile.
+#
+# This profile is intentionally conservative: by default it only adjusts
+# runtime MAVLink message intervals / data streams and does not persistently
+# write PX4 parameters. Set params_enabled: true only after reviewing the
+# exact parameters for your firmware and airframe.
+
+params_enabled: false
+
+# Optional persistent PX4 parameter writes. These are examples/placeholders for
+# USB MAVLink tuning and are skipped unless params_enabled is true.
+params:
+  # MAV_0_RATE: 40000
+  # MAV_0_MODE: 0
+
+# Runtime message rates, in Hz. A value <= 0 disables the message where the
+# firmware supports MAV_CMD_SET_MESSAGE_INTERVAL.
+message_intervals:
+  HEARTBEAT: 1
+  SYS_STATUS: 2
+  SYSTEM_TIME: 1
+  GPS_RAW_INT: 5
+  ATTITUDE: 20
+  LOCAL_POSITION_NED: 20
+  GLOBAL_POSITION_INT: 5
+  HIGHRES_IMU: 20
+  RC_CHANNELS: 5
+  ODOMETRY: 20
+
+# Legacy stream-rate fallback/compatibility requests, in Hz.
+streams:
+  EXT_STAT: 2
+  POSITION: 10
+  EXTRA1: 20
+  EXTRA2: 10
+  EXTRA3: 5

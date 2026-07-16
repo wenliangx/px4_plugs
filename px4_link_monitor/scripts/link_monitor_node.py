@@ -25,6 +25,16 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger, TriggerResponse
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+try:
+    from pymavlink import mavutil
+except ImportError:
+    mavutil = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,6 +86,357 @@ class TopicRateTracker:
 
 
 # ---------------------------------------------------------------------------
+# USBLinkInitializer
+# ---------------------------------------------------------------------------
+
+class USBLinkInitializer:
+    """Applies a conservative MAVLink USB link profile after PX4 connects."""
+
+    MESSAGE_IDS = {
+        "HEARTBEAT": 0,
+        "SYS_STATUS": 1,
+        "SYSTEM_TIME": 2,
+        "GPS_RAW_INT": 24,
+        "ATTITUDE": 30,
+        "LOCAL_POSITION_NED": 32,
+        "GLOBAL_POSITION_INT": 33,
+        "RC_CHANNELS": 65,
+        "HIGHRES_IMU": 105,
+        "TIMESYNC": 111,
+        "ATTITUDE_TARGET": 83,
+        "POSITION_TARGET_LOCAL_NED": 85,
+        "ODOMETRY": 331,
+    }
+
+    STREAM_IDS = {
+        "ALL": 0,
+        "RAW_SENSORS": 1,
+        "EXT_STAT": 2,
+        "RC_CHANNELS": 3,
+        "RAW_CONTROLLER": 4,
+        "POSITION": 6,
+        "EXTRA1": 10,
+        "EXTRA2": 11,
+        "EXTRA3": 12,
+    }
+
+    def __init__(
+        self,
+        connection_url: str,
+        baudrate: int,
+        timeout: float,
+        config_file: str,
+        dry_run: bool,
+        log_event,
+        log_dir: str,
+    ):
+        self.connection_url = connection_url
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self.config_file = os.path.abspath(os.path.expanduser(config_file))
+        self.dry_run = dry_run
+        self._log_event = log_event
+        self._log_dir = log_dir
+        self._mav = None
+
+    def run(self, reason: str = "manual") -> dict:
+        result = {
+            "success": False,
+            "reason": reason,
+            "dry_run": self.dry_run,
+            "message_intervals": 0,
+            "streams": 0,
+            "params": 0,
+            "backup_file": "",
+            "error": "",
+        }
+
+        try:
+            cfg = self._load_config()
+            self._log_event(
+                "USB_INIT_START",
+                "reason=%s dry_run=%s config=%s" % (reason, self.dry_run, self.config_file),
+            )
+
+            if not self.dry_run and not self._connect():
+                result["error"] = "Cannot connect to PX4"
+                self._log_event("USB_INIT_FAILED", result["error"])
+                return result
+
+            result["message_intervals"] = self._apply_message_intervals(
+                cfg.get("message_intervals", {})
+            )
+            result["streams"] = self._apply_streams(cfg.get("streams", {}))
+
+            params_enabled = bool(cfg.get("params_enabled", False))
+            params = cfg.get("params", {}) or {}
+            if params and params_enabled:
+                result["backup_file"] = self._backup_params(params)
+                result["params"] = self._apply_params(params)
+            elif params:
+                self._log_event(
+                    "USB_INIT_PARAMS_SKIPPED",
+                    "params_enabled=false count=%d" % len(params),
+                )
+
+            result["success"] = True
+            self._log_event(
+                "USB_INIT_DONE",
+                "dry_run=%s intervals=%d streams=%d params=%d backup=%s"
+                % (
+                    self.dry_run,
+                    result["message_intervals"],
+                    result["streams"],
+                    result["params"],
+                    result["backup_file"] or "none",
+                ),
+            )
+            return result
+        except Exception as e:
+            result["error"] = str(e)
+            self._log_event("USB_INIT_FAILED", result["error"])
+            return result
+        finally:
+            self._close()
+
+    def _load_config(self) -> dict:
+        if mavutil is None and not self.dry_run:
+            raise RuntimeError("pymavlink not installed. Run: pip install pymavlink")
+        if not os.path.isfile(self.config_file):
+            raise IOError("init_config not found: %s" % self.config_file)
+        if yaml is not None:
+            with open(self.config_file, "r") as f:
+                cfg = yaml.safe_load(f) or {}
+        else:
+            cfg = self._load_simple_yaml_mapping(self.config_file)
+        if not isinstance(cfg, dict):
+            raise ValueError("init_config must be a YAML mapping")
+        return cfg
+
+    @classmethod
+    def _load_simple_yaml_mapping(cls, path: str) -> dict:
+        """Small fallback parser for the simple mapping profile used here."""
+        root = {}
+        current_key = None
+        with open(path, "r") as f:
+            for raw_line in f:
+                line = raw_line.split("#", 1)[0].rstrip()
+                if not line.strip():
+                    continue
+                indent = len(line) - len(line.lstrip(" "))
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                key = key.strip()
+                value = value.strip()
+                if indent == 0:
+                    if value:
+                        root[key] = cls._parse_scalar(value)
+                        current_key = None
+                    else:
+                        root[key] = {}
+                        current_key = key
+                elif current_key:
+                    root[current_key][key] = cls._parse_scalar(value)
+        return root
+
+    @staticmethod
+    def _parse_scalar(value: str):
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        try:
+            if "." in value:
+                return float(value)
+            return int(value)
+        except ValueError:
+            return value.strip("\"'")
+
+    def _connect(self) -> bool:
+        if self._mav is not None:
+            return True
+        try:
+            url = self.connection_url.replace("serial:", "")
+            if url.startswith("/dev/") or url.startswith("COM"):
+                self._mav = mavutil.mavlink_connection(url, baud=self.baudrate)
+            else:
+                self._mav = mavutil.mavlink_connection(url)
+            self._mav.wait_heartbeat(timeout=self.timeout)
+            self._log_event(
+                "USB_INIT_CONNECTED",
+                "sys=%d comp=%d url=%s" % (
+                    self._mav.target_system,
+                    self._mav.target_component,
+                    self.connection_url,
+                ),
+            )
+            return True
+        except Exception as e:
+            self._mav = None
+            self._log_event("USB_INIT_CONNECT_FAILED", str(e))
+            return False
+
+    def _close(self):
+        if self._mav is not None:
+            try:
+                self._mav.close()
+            except Exception:
+                pass
+            self._mav = None
+
+    def _apply_message_intervals(self, intervals: dict) -> int:
+        count = 0
+        for name, hz in sorted((intervals or {}).items()):
+            msg_id = self._message_id(name)
+            interval_us = self._hz_to_interval_us(hz)
+            detail = "message=%s id=%d hz=%s interval_us=%d" % (
+                name, msg_id, hz, interval_us,
+            )
+            if self.dry_run:
+                self._log_event("USB_INIT_MSG_INTERVAL_DRYRUN", detail)
+            else:
+                self._mav.mav.command_long_send(
+                    self._mav.target_system,
+                    self._mav.target_component,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                    0,
+                    msg_id,
+                    interval_us,
+                    0, 0, 0, 0, 0,
+                )
+                self._log_event("USB_INIT_MSG_INTERVAL", detail)
+                time.sleep(0.02)
+            count += 1
+        return count
+
+    def _apply_streams(self, streams: dict) -> int:
+        count = 0
+        for name, hz in sorted((streams or {}).items()):
+            stream_id = self._stream_id(name)
+            detail = "stream=%s id=%d hz=%s" % (name, stream_id, hz)
+            if self.dry_run:
+                self._log_event("USB_INIT_STREAM_DRYRUN", detail)
+            else:
+                self._mav.mav.request_data_stream_send(
+                    self._mav.target_system,
+                    self._mav.target_component,
+                    stream_id,
+                    int(hz),
+                    1 if float(hz) > 0 else 0,
+                )
+                self._log_event("USB_INIT_STREAM", detail)
+                time.sleep(0.02)
+            count += 1
+        return count
+
+    def _backup_params(self, params: dict) -> str:
+        os.makedirs(self._log_dir, exist_ok=True)
+        path = os.path.join(
+            self._log_dir,
+            "link_init_backup_%s.yaml" % datetime.now().strftime("%Y%m%d_%H%M%S"),
+        )
+        backup = {
+            "timestamp": _fmt_dt(datetime.now()),
+            "connection_url": self.connection_url,
+            "params": {},
+        }
+
+        if self.dry_run:
+            backup["dry_run"] = True
+            backup["params"] = {name: None for name in sorted(params)}
+        else:
+            for name in sorted(params):
+                backup["params"][name] = self._read_param(name)
+
+        if yaml is not None:
+            with open(path, "w") as f:
+                yaml.safe_dump(backup, f, default_flow_style=False, sort_keys=False)
+        else:
+            with open(path, "w") as f:
+                f.write("timestamp: \"%s\"\n" % backup["timestamp"])
+                f.write("connection_url: \"%s\"\n" % backup["connection_url"])
+                if backup.get("dry_run"):
+                    f.write("dry_run: true\n")
+                f.write("params:\n")
+                for name, value in sorted(backup["params"].items()):
+                    f.write("  %s: %s\n" % (name, "null" if value is None else value))
+        self._log_event("USB_INIT_PARAM_BACKUP", path)
+        return path
+
+    def _apply_params(self, params: dict) -> int:
+        count = 0
+        for name, value in sorted(params.items()):
+            detail = "param=%s value=%s" % (name, value)
+            if self.dry_run:
+                self._log_event("USB_INIT_PARAM_DRYRUN", detail)
+            else:
+                ptype = (
+                    mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+                    if isinstance(value, float)
+                    else mavutil.mavlink.MAV_PARAM_TYPE_INT32
+                )
+                self._mav.mav.param_set_send(
+                    self._mav.target_system,
+                    self._mav.target_component,
+                    name.encode("utf-8")[:16],
+                    float(value),
+                    ptype,
+                )
+                self._log_event("USB_INIT_PARAM_SET", detail)
+                time.sleep(0.05)
+            count += 1
+        return count
+
+    def _read_param(self, name: str):
+        self._mav.mav.param_request_read_send(
+            self._mav.target_system,
+            self._mav.target_component,
+            name.encode("utf-8")[:16],
+            -1,
+        )
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            msg = self._mav.recv_match(type="PARAM_VALUE", blocking=True, timeout=1)
+            if msg is None:
+                continue
+            msg_name = msg.param_id.strip("\x00 ")
+            if msg_name == name:
+                return msg.param_value
+        return None
+
+    def _message_id(self, name) -> int:
+        if isinstance(name, int):
+            return name
+        text = str(name).strip()
+        if text.isdigit():
+            return int(text)
+        key = text.upper()
+        if key not in self.MESSAGE_IDS:
+            raise ValueError("Unknown MAVLink message name: %s" % text)
+        return self.MESSAGE_IDS[key]
+
+    def _stream_id(self, name) -> int:
+        if isinstance(name, int):
+            return name
+        text = str(name).strip()
+        if text.isdigit():
+            return int(text)
+        key = text.upper()
+        if key not in self.STREAM_IDS:
+            raise ValueError("Unknown MAVLink stream name: %s" % text)
+        return self.STREAM_IDS[key]
+
+    @staticmethod
+    def _hz_to_interval_us(hz) -> int:
+        hz_value = float(hz)
+        if hz_value <= 0:
+            return -1
+        return int(1000000.0 / hz_value)
+
+
+# ---------------------------------------------------------------------------
 # PX4LinkMonitor
 # ---------------------------------------------------------------------------
 
@@ -84,6 +445,18 @@ class PX4LinkMonitor:
         self._load_params()
         self._init_log_file()
         self._lock = threading.Lock()
+        self._init_lock = threading.Lock()
+
+        # State
+        self._fcu_connected = None
+        self._gcs_connected = None
+        self._overflow_count = 0
+        self._last_overflow_time = 0.0
+        self._overflow_message_ids = set()
+        self._session_start = datetime.now()
+        self._usb_init_started = False
+        self._usb_init_running = False
+        self._usb_init_last_result = None
 
         # Per-topic rate trackers
         self._trackers = {}
@@ -102,14 +475,8 @@ class PX4LinkMonitor:
 
         # Services
         rospy.Service("~status_report", Trigger, self._handle_status_report)
-
-        # State
-        self._fcu_connected = None
-        self._gcs_connected = None
-        self._overflow_count = 0
-        self._last_overflow_time = 0.0
-        self._overflow_message_ids = set()
-        self._session_start = datetime.now()
+        rospy.Service("~init_usb_link", Trigger, self._handle_init_usb_link)
+        rospy.Service("~init_status", Trigger, self._handle_init_status)
 
         self._log_event("SESSION_START", "Link Monitor started")
         self._publish_status()
@@ -128,6 +495,15 @@ class PX4LinkMonitor:
             "/mavros/setpoint_raw/local,/mavros/setpoint_position/local",
         )
         self.watch_topics = [t.strip() for t in watch_raw.split(",") if t.strip()]
+        self.enable_usb_init = rospy.get_param("~enable_usb_init", False)
+        self.auto_init_on_fcu_connected = rospy.get_param(
+            "~auto_init_on_fcu_connected", True
+        )
+        self.init_config = rospy.get_param("~init_config", "")
+        self.connection_url = rospy.get_param("~connection_url", "udp:127.0.0.1:14550")
+        self.baudrate = rospy.get_param("~baudrate", 115200)
+        self.timeout = rospy.get_param("~timeout", 10.0)
+        self.dry_run = rospy.get_param("~dry_run", True)
 
     @staticmethod
     def _resolve_dir(path: str) -> str:
@@ -181,6 +557,8 @@ class PX4LinkMonitor:
             if self._fcu_connected is None:
                 self._fcu_connected = conn
                 self._log_event("FCU_CONNECTION", "initial=%s" % conn)
+                if conn:
+                    self._maybe_schedule_usb_init("fcu_initial")
             elif self._fcu_connected != conn:
                 self._fcu_connected = conn
                 self._log_event(
@@ -188,6 +566,8 @@ class PX4LinkMonitor:
                     "connected=%s" % conn,
                 )
                 self._publish_status()
+                if conn:
+                    self._maybe_schedule_usb_init("fcu_reconnected")
 
         if is_gcs:
             conn = level != DiagnosticStatus.STALE
@@ -277,6 +657,7 @@ class PX4LinkMonitor:
     # ---- status -----------------------------------------------------------
 
     def _build_status_text(self) -> str:
+        init_result = self._format_init_result(self._usb_init_last_result)
         lines = [
             "--- PX4 Link Monitor ---",
             "session: %s" % _fmt_dt(self._session_start),
@@ -286,6 +667,9 @@ class PX4LinkMonitor:
             "overflow_count: %d" % self._overflow_count,
             "rate_window: %.1f s" % self.rate_window,
             "topic_rates: [%s]" % self._build_rate_info(),
+            "usb_init_enabled: %s" % self.enable_usb_init,
+            "usb_init_running: %s" % self._usb_init_running,
+            "usb_init_result: %s" % init_result,
             "log_file: %s" % self._log_path,
         ]
         return "\n".join(lines)
@@ -297,6 +681,91 @@ class PX4LinkMonitor:
     def _handle_status_report(self, req):
         text = self._build_status_text()
         return TriggerResponse(success=True, message=text)
+
+    # ---- USB link initialization ------------------------------------------
+
+    def _handle_init_usb_link(self, req):
+        result = self._run_usb_init("service")
+        return TriggerResponse(
+            success=result.get("success", False),
+            message=self._format_init_result(result),
+        )
+
+    def _handle_init_status(self, req):
+        return TriggerResponse(
+            success=True,
+            message=self._format_init_result(self._usb_init_last_result),
+        )
+
+    def _maybe_schedule_usb_init(self, reason: str):
+        if not self.enable_usb_init or not self.auto_init_on_fcu_connected:
+            return
+        if self._usb_init_started:
+            return
+        self._usb_init_started = True
+        timer = threading.Timer(2.0, self._run_usb_init, args=(reason,))
+        timer.daemon = True
+        timer.start()
+        self._log_event("USB_INIT_SCHEDULED", "reason=%s delay=2.0s" % reason)
+
+    def _run_usb_init(self, reason: str) -> dict:
+        with self._init_lock:
+            if self._usb_init_running:
+                return {
+                    "success": False,
+                    "reason": reason,
+                    "error": "USB link initialization already running",
+                }
+            self._usb_init_running = True
+            self._publish_status()
+
+            try:
+                if not self.init_config:
+                    result = {
+                        "success": False,
+                        "reason": reason,
+                        "error": "No init_config configured",
+                    }
+                    self._log_event("USB_INIT_FAILED", result["error"])
+                    return result
+
+                initializer = USBLinkInitializer(
+                    connection_url=self.connection_url,
+                    baudrate=self.baudrate,
+                    timeout=self.timeout,
+                    config_file=self.init_config,
+                    dry_run=self.dry_run,
+                    log_event=self._log_event,
+                    log_dir=self.log_dir,
+                )
+                result = initializer.run(reason=reason)
+                return result
+            finally:
+                if "result" in locals():
+                    self._usb_init_last_result = result
+                self._usb_init_running = False
+                self._publish_status()
+
+    @staticmethod
+    def _format_init_result(result=None) -> str:
+        if not result:
+            return "never_run"
+        if result.get("success"):
+            return (
+                "success reason=%s dry_run=%s intervals=%d streams=%d params=%d backup=%s"
+                % (
+                    result.get("reason", "unknown"),
+                    result.get("dry_run", False),
+                    result.get("message_intervals", 0),
+                    result.get("streams", 0),
+                    result.get("params", 0),
+                    result.get("backup_file", "") or "none",
+                )
+            )
+        return "failed reason=%s error=%s" % (
+            result.get("reason", "unknown"),
+            result.get("error", "unknown"),
+        )
 
 
 # ---------------------------------------------------------------------------
