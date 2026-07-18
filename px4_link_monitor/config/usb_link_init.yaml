@@ -11,6 +11,11 @@
 params_enabled: false
 params: {}
 
+# QGC-compatible legacy initial request:
+# MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES (520), param1=1 requests capability/version.
+commands:
+  REQUEST_AUTOPILOT_CAPABILITIES: 1
+
 # Values:
 #   DEFAULT  -> MAV_CMD_SET_MESSAGE_INTERVAL param2 = 0, restore vehicle default
 #   DISABLE  -> param2 = -1, disable message where supported

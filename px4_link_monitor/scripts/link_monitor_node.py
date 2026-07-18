@@ -123,6 +123,13 @@ class USBLinkInitializer:
         "EXTRA3": 12,
     }
 
+    COMMAND_IDS = {
+        "REQUEST_AUTOPILOT_CAPABILITIES": 520,
+        "MAV_CMD_REQUEST_AUTOPILOT_CAPABILITIES": 520,
+        "REQUEST_MESSAGE": 512,
+        "MAV_CMD_REQUEST_MESSAGE": 512,
+    }
+
     def __init__(
         self,
         connection_url: str,
@@ -147,6 +154,7 @@ class USBLinkInitializer:
             "success": False,
             "reason": reason,
             "dry_run": self.dry_run,
+            "commands": 0,
             "message_intervals": 0,
             "streams": 0,
             "params": 0,
@@ -166,6 +174,7 @@ class USBLinkInitializer:
                 self._log_event("USB_INIT_FAILED", result["error"])
                 return result
 
+            result["commands"] = self._apply_commands(cfg.get("commands", {}))
             result["message_intervals"] = self._apply_message_intervals(
                 cfg.get("message_intervals", {})
             )
@@ -185,9 +194,10 @@ class USBLinkInitializer:
             result["success"] = True
             self._log_event(
                 "USB_INIT_DONE",
-                "dry_run=%s intervals=%d streams=%d params=%d backup=%s"
+                "dry_run=%s commands=%d intervals=%d streams=%d params=%d backup=%s"
                 % (
                     self.dry_run,
+                    result["commands"],
                     result["message_intervals"],
                     result["streams"],
                     result["params"],
@@ -290,6 +300,37 @@ class USBLinkInitializer:
             except Exception:
                 pass
             self._mav = None
+
+    def _apply_commands(self, commands: dict) -> int:
+        count = 0
+        for name, params in sorted((commands or {}).items()):
+            command_id = self._command_id(name)
+            command_params = self._command_params(params)
+            detail = "command=%s id=%d params=%s" % (
+                name,
+                command_id,
+                ",".join(str(v) for v in command_params),
+            )
+            if self.dry_run:
+                self._log_event("USB_INIT_COMMAND_DRYRUN", detail)
+            else:
+                self._mav.mav.command_long_send(
+                    self._mav.target_system,
+                    self._mav.target_component,
+                    command_id,
+                    0,
+                    command_params[0],
+                    command_params[1],
+                    command_params[2],
+                    command_params[3],
+                    command_params[4],
+                    command_params[5],
+                    command_params[6],
+                )
+                self._log_event("USB_INIT_COMMAND", detail)
+                time.sleep(0.05)
+            count += 1
+        return count
 
     def _apply_message_intervals(self, intervals: dict) -> int:
         count = 0
@@ -432,6 +473,34 @@ class USBLinkInitializer:
         if key not in self.STREAM_IDS:
             raise ValueError("Unknown MAVLink stream name: %s" % text)
         return self.STREAM_IDS[key]
+
+    def _command_id(self, name) -> int:
+        if isinstance(name, int):
+            return name
+        text = str(name).strip()
+        if text.isdigit():
+            return int(text)
+        key = text.upper()
+        if key not in self.COMMAND_IDS:
+            raise ValueError("Unknown MAVLink command name: %s" % text)
+        return self.COMMAND_IDS[key]
+
+    @staticmethod
+    def _command_params(params) -> list:
+        if isinstance(params, (int, float)):
+            values = [float(params)]
+        elif isinstance(params, str):
+            text = params.strip()
+            values = [float(v.strip()) for v in text.split(",")] if text else []
+        elif isinstance(params, (list, tuple)):
+            values = [float(v) for v in params]
+        else:
+            values = []
+
+        values = values[:7]
+        while len(values) < 7:
+            values.append(0.0)
+        return values
 
     @staticmethod
     def _message_interval_to_us(rate) -> int:
@@ -765,10 +834,11 @@ class PX4LinkMonitor:
             return "never_run"
         if result.get("success"):
             return (
-                "success reason=%s dry_run=%s intervals=%d streams=%d params=%d backup=%s"
+                "success reason=%s dry_run=%s commands=%d intervals=%d streams=%d params=%d backup=%s"
                 % (
                     result.get("reason", "unknown"),
                     result.get("dry_run", False),
+                    result.get("commands", 0),
                     result.get("message_intervals", 0),
                     result.get("streams", 0),
                     result.get("params", 0),
