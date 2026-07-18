@@ -1,0 +1,26 @@
+<launch>
+  <arg name="log_dir"         default="~/.px4_monitor" />
+  <arg name="rate_window"     default="10.0" />
+  <arg name="overflow_cooldown" default="5.0" />
+  <arg name="watch_topics"    default="/mavros/setpoint_raw/local,/mavros/setpoint_position/local" />
+  <arg name="enable_usb_init" default="false" />
+  <arg name="init_config" default="$(find px4_link_monitor)/config/usb_link_init.yaml" />
+  <arg name="connection_url" default="udp:127.0.0.1:14550" />
+  <arg name="baudrate" default="115200" />
+  <arg name="timeout" default="10.0" />
+  <arg name="dry_run" default="true" />
+
+  <node name="px4_link_monitor" pkg="px4_link_monitor" type="link_monitor_node.py"
+        output="screen">
+    <param name="log_dir"           value="$(arg log_dir)" />
+    <param name="rate_window"       value="$(arg rate_window)" />
+    <param name="overflow_cooldown" value="$(arg overflow_cooldown)" />
+    <param name="watch_topics"      value="$(arg watch_topics)" />
+    <param name="enable_usb_init" value="$(arg enable_usb_init)" />
+    <param name="init_config" value="$(arg init_config)" />
+    <param name="connection_url" value="$(arg connection_url)" />
+    <param name="baudrate" value="$(arg baudrate)" />
+    <param name="timeout" value="$(arg timeout)" />
+    <param name="dry_run" value="$(arg dry_run)" />
+  </node>
+</launch>

@@ -1,0 +1,47 @@
+# PX4 Parameter Filter File
+# Controls which parameters are exported/imported.
+#
+# Modes:
+#   whitelist — only listed params are included
+#   blacklist — all params EXCEPT listed ones are included
+#
+# Patterns support shell-style wildcards: *, ?, [...]
+#   Example: "MC_*" matches all multicopter params
+#            "MPC_*" matches all MPC controller params
+
+mode: whitelist
+
+params:
+  # --- Multicopter attitude controller ---
+  - MC_ROLL_P
+  - MC_ROLLRATE_P
+  - MC_ROLLRATE_I
+  - MC_ROLLRATE_D
+  - MC_PITCH_P
+  - MC_PITCHRATE_P
+  - MC_PITCHRATE_I
+  - MC_PITCHRATE_D
+  - MC_YAW_P
+  - MC_YAWRATE_P
+  - MC_YAWRATE_I
+  - MC_YAWRATE_D
+
+  # --- Position controller ---
+  - MPC_XY_P
+  - MPC_XY_VEL_P
+  - MPC_XY_VEL_I
+  - MPC_XY_VEL_D
+  - MPC_Z_P
+  - MPC_Z_VEL_P
+  - MPC_Z_VEL_I
+  - MPC_Z_VEL_D
+
+  # --- Auto-tune results ---
+  - AT_*
+
+  # --- Sensor calibration ---
+  - CAL_*
+
+  # --- Airframe ---
+  - SYS_AUTOSTART
+  - SYS_AUTOCONFIG
